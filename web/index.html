@@ -1,0 +1,718 @@
+<title>8-Bit Zombies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap">
+<style>
+/* Layout: one arcade cabinet column — title, the game screen, then controls. Single dark look by choice. */
+:root {
+  --bg: #0b0a10;
+  --panel: #17131d;
+  --line: #2c2433;
+  --fg: #e9e2d4;
+  --muted: #8d8496;
+  --blood: #d8322b;
+  --gold: #f2c14e;
+  --display: "Press Start 2P", ui-monospace, "Courier New", monospace;
+  --body: "VT323", ui-monospace, "Courier New", monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--body);
+  font-size: 20px;
+  line-height: 1.25;
+}
+.wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding-inline: 16px;
+  padding-block: 20px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: clamp(16px, 3.4vw, 26px);
+  color: var(--blood);
+  letter-spacing: 0.04em;
+  text-shadow: 3px 3px 0 #3a0c0a;
+  text-wrap: balance;
+}
+header p { margin: 0; color: var(--muted); }
+.screen {
+  position: relative;
+  border: 4px solid var(--line);
+  background: #000;
+  box-shadow: 0 0 0 4px #000, 0 18px 40px rgba(0, 0, 0, 0.6);
+}
+canvas {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 320 / 200;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  cursor: crosshair;
+  touch-action: none;
+}
+.start {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border: 0;
+  width: 100%;
+  background: rgba(5, 4, 8, 0.82);
+  color: var(--fg);
+  font-family: var(--display);
+  font-size: clamp(11px, 2.2vw, 16px);
+  cursor: pointer;
+}
+.start strong { color: var(--gold); animation: blink 1s steps(2, start) infinite; font-weight: 400; }
+.start span { font-family: var(--body); font-size: clamp(16px, 2.4vw, 22px); color: var(--muted); }
+.start:focus-visible, .pad button:focus-visible { outline: 3px solid var(--gold); outline-offset: -3px; }
+@keyframes blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .start strong { animation: none; } }
+
+.pad { display: none; justify-content: space-between; align-items: center; gap: 16px; user-select: none; -webkit-user-select: none; }
+.pad button {
+  font-family: var(--display);
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 3px solid var(--line);
+  border-bottom-width: 6px;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.pad button.on { background: var(--line); border-bottom-width: 3px; transform: translateY(3px); }
+.dpad { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(2, 52px); gap: 6px; }
+.dpad [data-k="up"] { grid-column: 2; grid-row: 1; }
+.dpad [data-k="left"] { grid-column: 1; grid-row: 2; }
+.dpad [data-k="down"] { grid-column: 2; grid-row: 2; }
+.dpad [data-k="right"] { grid-column: 3; grid-row: 2; }
+.actions { display: flex; gap: 10px; align-items: center; }
+.actions [data-k="reload"] { width: 56px; height: 56px; }
+.actions .fire { width: 92px; height: 92px; border-radius: 50%; background: #5a1512; border-color: #2a0907; color: var(--gold); }
+@media (hover: none), (pointer: coarse) { .pad { display: flex; } }
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 6px 20px;
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  border-left: 4px solid var(--blood);
+}
+.controls div { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.controls dt { font-family: var(--display); font-size: 11px; color: var(--gold); white-space: nowrap; letter-spacing: 0.05em; }
+.controls dd { margin: 0; color: var(--fg); }
+.note { margin: 0; color: var(--muted); max-width: 65ch; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>8-BIT ZOMBIES</h1>
+    <p>Survive the rounds. Ammo refills when a new round starts.</p>
+  </header>
+
+  <div class="screen">
+    <canvas id="game" width="320" height="200" aria-label="Game screen"></canvas>
+    <button class="start" id="start" type="button">
+      <strong>PRESS TO START</strong>
+      <span id="startHint">Click to play. The mouse turns, click shoots. Esc frees the mouse.</span>
+    </button>
+  </div>
+
+  <div class="pad" id="pad" aria-label="Touch controls">
+    <div class="dpad">
+      <button type="button" data-k="up" aria-label="Forward">▲</button>
+      <button type="button" data-k="left" aria-label="Turn left">◀</button>
+      <button type="button" data-k="down" aria-label="Back">▼</button>
+      <button type="button" data-k="right" aria-label="Turn right">▶</button>
+    </div>
+    <div class="actions">
+      <button type="button" data-k="reload" aria-label="Reload">R</button>
+      <button type="button" data-k="fire" class="fire" aria-label="Fire">FIRE</button>
+    </div>
+  </div>
+
+  <dl class="controls">
+    <div><dt>WASD ↑↓</dt><dd>move</dd></div>
+    <div><dt>A D ← →</dt><dd>turn (or the mouse)</dd></div>
+    <div><dt>Q E</dt><dd>strafe</dd></div>
+    <div><dt>SHIFT</dt><dd>sprint</dd></div>
+    <div><dt>SPACE</dt><dd>shoot (or click)</dd></div>
+    <div><dt>R</dt><dd>reload</dd></div>
+    <div><dt>M</dt><dd>show/hide the map</dd></div>
+    <div><dt>ENTER</dt><dd>restart after game over</dd></div>
+  </dl>
+  <p class="note">10 points for a hit, 60 for a kill. Every round brings more zombies, and they get tougher and faster. Co-op needs the downloadable version, because browsers can't open the network connection it uses.</p>
+</div>
+
+<script>
+(() => {
+"use strict";
+// ---------------------------------------------------------------- constants
+const W = 320, H = 200, VH = 168, HOR = VH / 2;
+const FOV = 60, PLANE = Math.tan(FOV / 2 * Math.PI / 180), PROJ = (W / 2) / PLANE;
+const S = 32, MX = 20, MY = 20;            // cell size, map size
+const PLAYER_R = 8, ZOMBIE_R = 8, SPEED = 80, SPRINT = 1.6, TURN = 120;
+const MAG = 12, RESERVE = 240, FIRE_DELAY = 0.22, RELOAD = 1.2, DAMAGE = 50, MAX_Z = 24;
+const SPR_RED = 0, SPR_GREEN = 1, SPR_GNOME = 3;
+
+const MAP = [
+  "11111111111111111111",
+  "10000000000000000001",
+  "10011111000001111101",
+  "10010000000001000101",
+  "10010001000001000101",
+  "10010001000001101101",
+  "10011111000000000001",
+  "10000000000000000001",
+  "10000000000000000001",
+  "10000000000000000001",
+  "10111111110000000001",
+  "10100000000000000001",
+  "10100100010000000001",
+  "10100100010000000001",
+  "10100100010000000001",
+  "10111111110000000001",
+  "10000000000000000001",
+  "10000000000000000001",
+  "10000000000000000001",
+  "11111111111111111111",
+].map(r => [...r].map(Number));
+const SPAWNS = [[1,1],[18,1],[10,1],[1,9],[18,9],[10,8],[1,18],[18,18],[4,12],[15,3]];
+const SPRITE_SRC = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAABcElEQVRYCeVUW3LDIAyETg+UXqo5U3up5kbUS7wykWWERWbyEWY8gB67iwRO6d1HnixA6eQPYQ8FHZCUn3Sprmu6Ja4ZC9syXHw3gIBqFnLaoyI+CPCqOVKB3el74r1WfPaSR3zf5U/CfvNX4j7nvLsXEtgsplsAImuU0nsgW8a0gFGijfJxNS0AZcfHofe0H83TAggM4vXCVVMrijHWbDfQitxs0lz989lC7ivvBSAqUgFTNE+PmWstyNpHBFg4YZt5GgdNWuDEwe3in6kAiOUvaPVf2VxyKBz9Ewqx0V8hWnxtHASLD2TWOFMBKx+2My3ZYfQUCjBK255clZo+YtU8nbMw0/8gwjTiVC3JSt7GVn8jqvWRwMOocZEWCDBErkKlWmR/xgxQfhoPIujrkbsxvVdglVULwb4X1/NVrEgLLBFhW0SALjnLHBLhlkihygVUdv0UtftwH6nAIVjE8XIBZ1uAQ+o7wINHsJj7xvM/DfRcfCZqpsIAAAAASUVORK5CYII=", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAABdElEQVRYCeVUW1LDMAxMGE4C16FwVqDXaa+SZk1WcRVFcmRm+lHPZGzrsbuW7AzDs4+xswCTk9+E3RS0QzK9fX8U1/XrPHDNWNjmEeKHAQRUs5DTnhXxQoBHzZkKbE7viY9a8eolt/gun78S9v5zGrgfx3FzLySwWnS3AETWmCbvgawZ3QJaiVbK+1W3AJQdH4fe0743dwsgMIiXC1dMtSjGWLPdQCtytUlz9c9nDflbRS8AUZkKmKJ5esxca0HWPiPAwknbzNMEaNKCIA7uEP9IBUAsf0Gr/8oWkkNh659QiI3+CtHsq+MgWHwgs8aRClj5sB1pyQbDUyjAKG19clVq+ohV8nTOzEz/nQjTiFPVJAt5HVv8lajaR4IIo8RlWiDAELkIlWqR/T9mgPLTeBBBn0cexnivwCqrFoK9F+f5ClamBZaItC0jQJecZU6JCEukUOUCKrt+itq9u89UYBcs43i4gKMtwCH1HeDBM1jMfeL5BsCGcywlraZqAAAAAElFTkSuQmCC", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAABeklEQVRYCeVVMW7DMAxUi76ge8bOyZT+qHlT8qN2SuaO2fuF1BR8BM1QpEUbyBABAU0edTyRllPKs6+XhQ24Oftncc9KahS5bffHCl1+DgXPyKXYsEL+MAGEynJxxLMiXkHwKJvpwN3pPfHRKN68zXOw8/cXp+0+T0X7DDYeVhvB3+ZjUkL7E1A4qwl4v/4K2lK0PwGFs1gAtZ1+WNpHvGUXCwAxFR5fuBqSopBj2dQtAJH++CAOG90Ayst0wBSN05PFM4R4NiPA4+vGzNMELN4fkN4a8vd0gArzV9Cav4qFxUnt3C8hFzbmy4UGTOaRYMaomLV6OmDtp1jPSO44PIVMTK2VJ1etBgauuk/vGSoDn4gwg3QqWWQsLnMrLkRJDAUijpqXGQETk8hRKHcL1dewRIqf5iMRwLziYY53C6y2aiHke3keVrkyI7BEpGMZAbrlaHNKRNgixcovoIrrq6jhpp/pQJMsAzxcQO8I6JD6HcDBM1zY+8T2H0zBcidKmJgGAAAAAElFTkSuQmCC", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAABUElEQVRYCe1VMU7EMBAMfOF+QHkPyROQ7m+IlvL6PIQKUeUL1EfG8qzs5WLPJoiGRDqtY8/OjDde3zAcz3+vwMPGAtyKvK0ciSKanITHcTT9aZpsvAyifKGEWylcqnJcmJGNqMCuOE0gZiMStwJK4m/vn6ZxOT/ZmAO/rpp4JIEST/PHcE8cuZhfW2txywbWyK+vzxU/cOruq8TGC04+PkOKX/NLFTGPH+YZgW/whZcqYhrx0RsLqzQSbHcLxiqBcc5JFfGGGnzhpSSQBcuxJzJDNOMBW98pquZH8V1e7qwLLAByTq8N8c3BKxMCG8mRbsK8swgWKQp+6FWgJOpVAd2SvWriBCsxteICpAlG5latysnfiqn30VpsL146WQBmbC0qqnwnHqof3Ljz84HbfP8rBiDsS27CWNzz56MagI5/SlN7eDzv8X5U4KjA31bgG4dCrYRAQxBnAAAAAElFTkSuQmCC"];
+
+const rad = d => d * Math.PI / 180;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const center = c => (c + 0.5) * S;
+
+// ---------------------------------------------------------------- map helpers
+const wallAt = (cx, cy) => cx < 0 || cy < 0 || cx >= MX || cy >= MY || MAP[cy][cx] > 0;
+const isWall = (x, y) => wallAt(Math.floor(x / S), Math.floor(y / S));
+const collides = (x, y, r) => isWall(x - r, y - r) || isWall(x + r, y - r) || isWall(x - r, y + r) || isWall(x + r, y + r);
+function move(o, dx, dy, r) {
+  if (!collides(o.x + dx, o.y, r)) o.x += dx;   // one axis at a time = slide along walls
+  if (!collides(o.x, o.y + dy, r)) o.y += dy;
+}
+
+// DDA ray cast. Hit point = origin + rayT * dir. With a unit dir, rayT is the distance.
+let rayT = 0, raySide = 0, rayU = 0;
+function raycast(ox, oy, dx, dy) {
+  const px = ox / S, py = oy / S;
+  let mx = Math.floor(px), my = Math.floor(py);
+  const ddx = dx === 0 ? 1e30 : Math.abs(1 / dx), ddy = dy === 0 ? 1e30 : Math.abs(1 / dy);
+  const sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
+  let tx = dx < 0 ? (px - mx) * ddx : (mx + 1 - px) * ddx;
+  let ty = dy < 0 ? (py - my) * ddy : (my + 1 - py) * ddy;
+  let side = 0;
+  for (let i = 0; i < 64; i++) {
+    if (tx < ty) { tx += ddx; mx += sx; side = 0; } else { ty += ddy; my += sy; side = 1; }
+    if (wallAt(mx, my)) break;
+  }
+  const t = side === 0 ? tx - ddx : ty - ddy;
+  const w = side === 0 ? py + t * dy : px + t * dx;
+  rayT = t * S; raySide = side; rayU = w - Math.floor(w);
+  return rayT;
+}
+
+// ---------------------------------------------------------------- game state
+function newGame() {
+  return {
+    state: "play", round: 0, toSpawn: 0, spawnTimer: 0, roundBreak: 2.5, time: 0,
+    p: { x: center(10), y: center(17), a: 90, hp: 100, alive: true, points: 500, kills: 0, lastHurt: -100, regen: 0 },
+    zombies: [],
+    mag: MAG, reserve: RESERVE, fireCd: 0, reload: 0, flash: 0, hurt: 0, hit: 0,
+  };
+}
+let G = newGame();
+let best = 0;
+try { best = Number(localStorage.getItem("zombies-best")) || 0; } catch (e) {}
+let showMap = true, started = false;
+
+const remaining = () => G.toSpawn + G.zombies.length;
+
+// Distance (in cells) from every cell to the player. Zombies walk downhill on it.
+const flow = new Int16Array(MX * MY);
+function buildFlow() {
+  flow.fill(9999);
+  const q = [];
+  const cx = Math.floor(G.p.x / S), cy = Math.floor(G.p.y / S);
+  if (!G.p.alive || wallAt(cx, cy)) return;
+  flow[cy * MX + cx] = 0; q.push(cx, cy);
+  for (let h = 0; h < q.length; h += 2) {
+    const x = q[h], y = q[h + 1], d = flow[y * MX + x] + 1;
+    for (const [ox, oy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = x + ox, ny = y + oy;
+      if (wallAt(nx, ny) || flow[ny * MX + nx] <= d) continue;
+      flow[ny * MX + nx] = d; q.push(nx, ny);
+    }
+  }
+}
+
+function spawnZombie() {
+  if (G.zombies.length >= MAX_Z) return;
+  let pick = SPAWNS[Math.floor(Math.random() * SPAWNS.length)];
+  for (let i = 0; i < 20; i++) {
+    const s = SPAWNS[Math.floor(Math.random() * SPAWNS.length)];
+    if (Math.hypot(center(s[0]) - G.p.x, center(s[1]) - G.p.y) > 6 * S) { pick = s; break; }
+  }
+  const kinds = [SPR_RED, SPR_GREEN, SPR_GREEN, SPR_GNOME];
+  G.zombies.push({
+    x: center(pick[0]) + Math.random() * 8 - 4, y: center(pick[1]) + Math.random() * 8 - 4,
+    hp: 100 + 40 * (G.round - 1), spr: kinds[Math.floor(Math.random() * 4)], cd: 0.5, flash: 0,
+  });
+  G.toSpawn--;
+}
+
+function startRound() {
+  G.round++;
+  G.toSpawn = 5 + 3 * G.round;
+  G.spawnTimer = 0;
+  G.reserve = RESERVE;  // max ammo every round
+  sfx.round();
+}
+
+function moveZombie(z, dt) {
+  const p = G.p;
+  z.cd -= dt;
+  let dx = p.x - z.x, dy = p.y - z.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < PLAYER_R + ZOMBIE_R + 6) {
+    if (z.cd <= 0 && p.alive) {
+      p.hp -= 34; p.lastHurt = G.time; z.cd = 1;
+      G.hurt = 0.4; sfx.hurt();
+      if (p.hp <= 0) { p.hp = 0; p.alive = false; }
+    }
+    return;
+  }
+  let gx = p.x, gy = p.y;
+  const cx = Math.floor(z.x / S), cy = Math.floor(z.y / S);
+  const canSee = raycast(z.x, z.y, dx / dist, dy / dist) > dist;
+  if (!canSee && !wallAt(cx, cy)) {
+    let bestD = flow[cy * MX + cx];
+    for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+      const nx = cx + ox, ny = cy + oy;
+      if ((!ox && !oy) || wallAt(nx, ny)) continue;
+      if (ox && oy && (wallAt(cx + ox, cy) || wallAt(cx, cy + oy))) continue; // no corner cutting
+      if (flow[ny * MX + nx] < bestD) { bestD = flow[ny * MX + nx]; gx = center(nx); gy = center(ny); }
+    }
+  }
+  dx = gx - z.x; dy = gy - z.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 0.001) return;
+  const sp = Math.min(35 + 5 * G.round, 95) * dt;
+  move(z, dx / len * sp, dy / len * sp, ZOMBIE_R);
+}
+
+function fire() {
+  const p = G.p;
+  if (!p.alive || G.state !== "play" || G.reload > 0 || G.fireCd > 0) return;
+  if (G.mag === 0) { startReload(); return; }
+  G.mag--; G.fireCd = FIRE_DELAY; G.flash = 0.08;
+  sfx.shoot();
+
+  const dX = Math.cos(rad(p.a)), dY = -Math.sin(rad(p.a)), rX = -dY, rY = dX;
+  let hitZ = null, hitD = raycast(p.x, p.y, dX, dY);
+  for (const z of G.zombies) {
+    const ox = z.x - p.x, oy = z.y - p.y;
+    const depth = ox * dX + oy * dY, side = ox * rX + oy * rY;
+    if (depth > 0 && depth < hitD && Math.abs(side) < ZOMBIE_R + 1) { hitZ = z; hitD = depth; }
+  }
+  if (!hitZ) return;
+  hitZ.hp -= DAMAGE; hitZ.flash = 0.15; p.points += 10; G.hit = 0.15; sfx.hit();
+  if (hitZ.hp <= 0) {
+    G.zombies.splice(G.zombies.indexOf(hitZ), 1);
+    p.points += 60; p.kills++;
+  }
+}
+
+function startReload() {
+  if (G.reload <= 0 && G.mag < MAG && G.reserve > 0 && G.p.alive) { G.reload = RELOAD; sfx.reload(); }
+}
+
+function update(dt) {
+  const p = G.p;
+  G.time += dt;
+  for (const k of ["flash", "hurt", "hit", "fireCd"]) if (G[k] > 0) G[k] -= dt;
+  if (G.reload > 0) {
+    G.reload -= dt;
+    if (G.reload <= 0) {
+      const take = Math.min(MAG - G.mag, G.reserve);
+      G.mag += take; G.reserve -= take; G.reload = 0;
+    }
+  }
+  if (G.state !== "play") return;
+
+  // Player
+  let turn = 0;
+  if (keys.a || keys.left) turn += 1;
+  if (keys.d || keys.right) turn -= 1;
+  p.a = (p.a + turn * TURN * dt + 360) % 360;
+  const dX = Math.cos(rad(p.a)), dY = -Math.sin(rad(p.a)), rX = -dY, rY = dX;
+  const fwd = (keys.w || keys.up ? 1 : 0) - (keys.s || keys.down ? 1 : 0);
+  const str = (keys.e ? 1 : 0) - (keys.q ? 1 : 0);
+  const mx = dX * fwd + rX * str, my = dY * fwd + rY * str, len = Math.hypot(mx, my);
+  if (len > 0) {
+    const sp = SPEED * (keys.shift ? SPRINT : 1) * dt / len;
+    move(p, mx * sp, my * sp, PLAYER_R);
+  }
+
+  // Rounds
+  if (G.roundBreak > 0) {
+    G.roundBreak -= dt;
+    if (G.roundBreak <= 0) startRound();
+  } else {
+    G.spawnTimer -= dt;
+    if (G.toSpawn > 0 && G.spawnTimer <= 0) { spawnZombie(); G.spawnTimer = Math.max(0.4, 2 - G.round * 0.1); }
+    if (remaining() === 0) G.roundBreak = 6;
+  }
+
+  // Zombies
+  buildFlow();
+  for (const z of G.zombies) { if (z.flash > 0) z.flash -= dt; moveZombie(z, dt); }
+  for (let i = 0; i < G.zombies.length; i++) for (let j = i + 1; j < G.zombies.length; j++) {
+    const a = G.zombies[i], b = G.zombies[j];
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+    if (d < 14 && d > 0.001) {
+      const push = (14 - d) * 0.5;
+      move(a, -dx / d * push, -dy / d * push, ZOMBIE_R);
+      move(b, dx / d * push, dy / d * push, ZOMBIE_R);
+    }
+  }
+
+  // Health regen and death
+  if (p.alive && p.hp < 100 && G.time - p.lastHurt > 4) {
+    p.regen += 50 * dt;
+    const add = Math.floor(p.regen); p.regen -= add; p.hp = Math.min(100, p.hp + add);
+  }
+  if (!p.alive) {
+    G.state = "over";
+    sfx.over();
+    if (G.round > best) { best = G.round; try { localStorage.setItem("zombies-best", String(best)); } catch (e) {} }
+  }
+}
+
+// ---------------------------------------------------------------- sound (8-bit, generated)
+let ac = null;
+function ensureAudio() {
+  if (ac) { if (ac.state === "suspended") ac.resume(); return; }
+  try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; }
+}
+function tone(type, f0, f1, dur, vol) {
+  if (!ac) return;
+  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur);
+}
+function noise(dur, vol) {
+  if (!ac) return;
+  const n = Math.floor(ac.sampleRate * dur), b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
+  let v = 0;
+  for (let i = 0; i < n; i++) { if (i % 8 === 0) v = Math.random() < 0.5 ? -1 : 1; d[i] = v * (1 - i / n) ** 2; }
+  const s = ac.createBufferSource(), g = ac.createGain();
+  s.buffer = b; g.gain.value = vol; s.connect(g).connect(ac.destination); s.start();
+}
+const sfx = {
+  shoot: () => noise(0.18, 0.35),
+  hit: () => tone("square", 880, 660, 0.05, 0.08),
+  hurt: () => tone("square", 220, 90, 0.3, 0.15),
+  reload: () => { tone("square", 300, 300, 0.04, 0.06); setTimeout(() => tone("square", 450, 450, 0.04, 0.06), 900); },
+  round: () => { tone("square", 196, 196, 0.25, 0.08); setTimeout(() => tone("square", 147, 147, 0.5, 0.08), 260); },
+  over: () => tone("sawtooth", 160, 40, 1.2, 0.12),
+};
+
+// ---------------------------------------------------------------- textures
+const rgb = (r, g, b) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
+const brick = { r: new Uint8Array(256), g: new Uint8Array(256), b: new Uint8Array(256) };
+(() => {
+  const pal = [[150, 60, 40], [130, 50, 36], [168, 74, 48]];
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const row = y >> 2, bx = (x + (row & 1) * 4) % 8, i = y * 16 + x;
+    let c;
+    if (y % 4 === 3 || bx === 7) c = [70, 64, 60];
+    else {
+      c = pal[(((x + (row & 1) * 4) >> 3) + row * 3) * 37 % 3].slice();
+      if (y % 4 === 0) { c[0] += 30; c[1] += 20; c[2] += 15; }
+    }
+    brick.r[i] = c[0]; brick.g[i] = c[1]; brick.b[i] = c[2];
+  }
+})();
+
+const sprites = [];
+function loadSprites() {
+  return Promise.all(SPRITE_SRC.map((src, i) => new Promise(res => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.width; c.height = img.height;
+      const cx = c.getContext("2d"); cx.drawImage(img, 0, 0);
+      sprites[i] = { w: img.width, h: img.height, d: cx.getImageData(0, 0, img.width, img.height).data };
+      res();
+    };
+    img.onerror = () => { sprites[i] = { w: 1, h: 1, d: new Uint8ClampedArray([255, 0, 255, 255]) }; res(); };
+    img.src = src;
+  })));
+}
+
+// ---------------------------------------------------------------- rendering
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const img = ctx.createImageData(W, H);
+const px = new Uint32Array(img.data.buffer);
+const zbuf = new Float32Array(W);
+
+// Banded sky and floor colours: 8 steps each, like an old palette
+const rowColor = new Uint32Array(VH);
+for (let y = 0; y < VH; y++) {
+  if (y < HOR) { const t = Math.floor((1 - y / HOR) * 8) / 8; rowColor[y] = rgb(14 * t | 0, 10 * t | 0, 24 * t | 0); }
+  else { const t = Math.floor(((y - HOR) / HOR) * 8) / 8; rowColor[y] = rgb(70 * t | 0, 60 * t | 0, 52 * t | 0); }
+}
+const band = f => Math.ceil(f * 8) / 8; // 8-bit style stepped lighting
+
+function fillRect(x, y, w, h, c) {
+  const x0 = Math.max(0, x | 0), y0 = Math.max(0, y | 0), x1 = Math.min(W, (x + w) | 0), y1 = Math.min(H, (y + h) | 0);
+  for (let yy = y0; yy < y1; yy++) px.fill(c, yy * W + x0, yy * W + x1);
+}
+
+const GUN = [
+  "......KK......",
+  ".....KGGK.....",
+  ".....KGGK.....",
+  "....KGLGGK....",
+  "....KGLGGK....",
+  "....KGLGGK....",
+  "....KGDDGK....",
+  "...SKGGGGKS...",
+  "..SSKKKKKKSS..",
+  ".SSSSSSSSSSSS.",
+  ".SSSHSSSSHSSS.",
+  "SSSSSSSSSSSSSS",
+];
+const GUN_COL = { K: rgb(12, 12, 12), G: rgb(115, 115, 128), L: rgb(180, 180, 190), D: rgb(64, 64, 72), S: rgb(217, 153, 115), H: rgb(166, 107, 77) };
+
+function render() {
+  const p = G.p;
+  const dX = Math.cos(rad(p.a)), dY = -Math.sin(rad(p.a)), rX = -dY, rY = dX;
+
+  // Sky + floor
+  for (let y = 0; y < VH; y++) px.fill(rowColor[y], y * W, y * W + W);
+
+  // Walls, one ray per pixel column
+  for (let x = 0; x < W; x++) {
+    const cam = 2 * (x + 0.5) / W - 1;
+    const rdx = dX + rX * PLANE * cam, rdy = dY + rY * PLANE * cam;
+    let dist = Math.max(raycast(p.x, p.y, rdx, rdy), 0.5); // already perpendicular: no fisheye
+    zbuf[x] = dist;
+    let u = rayU;
+    if ((raySide === 0 && rdx < 0) || (raySide === 1 && rdy > 0)) u = 1 - u;
+    const tx = Math.floor(u * 32) & 15;
+    const lineH = PROJ * S / dist, top = HOR - lineH / 2;
+    const y0 = Math.max(0, Math.ceil(top)), y1 = Math.min(VH, Math.ceil(top + lineH));
+    const f = band(clamp(1 - dist / (S * 14), 0.2, 1)) * (raySide ? 0.7 : 1);
+    for (let y = y0; y < y1; y++) {
+      const ty = Math.floor((y - top) / lineH * 32) & 15, i = ty * 16 + tx;
+      px[y * W + x] = rgb(brick.r[i] * f | 0, brick.g[i] * f | 0, brick.b[i] * f | 0);
+    }
+  }
+
+  // Zombies, far to near, hidden behind walls with the z-buffer
+  const list = G.zombies.map(z => ({ z, depth: (z.x - p.x) * dX + (z.y - p.y) * dY }))
+    .filter(o => o.depth > 2).sort((a, b) => b.depth - a.depth);
+  for (const { z, depth } of list) {
+    const spr = sprites[z.spr];
+    const side = (z.x - p.x) * rX + (z.y - p.y) * rY;
+    const sx = W / 2 + side * PROJ / depth;
+    const size = PROJ * 28 / depth;
+    const bottom = HOR + PROJ * (S / 2) / depth, top = bottom - size, left = sx - size / 2;
+    const x0 = Math.max(0, Math.floor(left)), x1 = Math.min(W, Math.ceil(left + size));
+    const y0 = Math.max(0, Math.ceil(top)), y1 = Math.min(VH, Math.ceil(bottom));
+    const f = band(clamp(1 - depth / (S * 14), 0.25, 1));
+    for (let x = x0; x < x1; x++) {
+      if (depth >= zbuf[x]) continue;
+      const tx = clamp(Math.floor((x - left) / size * spr.w), 0, spr.w - 1);
+      for (let y = y0; y < y1; y++) {
+        const ty = clamp(Math.floor((y - top) / size * spr.h), 0, spr.h - 1);
+        const i = (ty * spr.w + tx) * 4;
+        if (spr.d[i + 3] < 128) continue;
+        px[y * W + x] = z.flash > 0
+          ? rgb(255, spr.d[i + 1] * 0.3 | 0, spr.d[i + 2] * 0.3 | 0)
+          : rgb(spr.d[i] * f | 0, spr.d[i + 1] * f | 0, spr.d[i + 2] * f | 0);
+      }
+    }
+  }
+
+  // Pistol
+  const ps = 3, recoil = G.flash > 0 ? 5 : 0;
+  const dip = G.reload > 0 ? 24 * Math.sin(Math.PI * G.reload / RELOAD) : 0;
+  const gx = W / 2 - 7 * ps, gy = Math.round(VH - GUN.length * ps + recoil + dip);
+  if (G.flash > 0) {
+    fillRect(W / 2 - 7, gy - 12, 14, 8, rgb(255, 220, 60));
+    fillRect(W / 2 - 3, gy - 18, 6, 18, rgb(255, 220, 60));
+    fillRect(W / 2 - 3, gy - 11, 6, 6, rgb(255, 255, 210));
+  }
+  for (let r = 0; r < GUN.length; r++) for (let c = 0; c < 14; c++) {
+    const col = GUN_COL[GUN[r][c]];
+    if (col && gy + r * ps < VH) fillRect(gx + c * ps, gy + r * ps, ps, Math.min(ps, VH - (gy + r * ps)), col);
+  }
+
+  // Crosshair + hit marker
+  const cx = W / 2, cy = HOR, white = rgb(255, 255, 255);
+  fillRect(cx, cy - 5, 1, 3, white); fillRect(cx, cy + 3, 1, 3, white);
+  fillRect(cx - 5, cy, 3, 1, white); fillRect(cx + 3, cy, 3, 1, white);
+  if (G.hit > 0) for (let k = 3; k < 6; k++) {
+    fillRect(cx - k, cy - k, 1, 1, white); fillRect(cx + k, cy - k, 1, 1, white);
+    fillRect(cx - k, cy + k, 1, 1, white); fillRect(cx + k, cy + k, 1, 1, white);
+  }
+
+  // Minimap
+  if (showMap) {
+    const m = 3, ox = 4, oy = 4;
+    fillRect(ox - 1, oy - 1, MX * m + 2, MY * m + 2, rgb(0, 0, 0));
+    for (let y = 0; y < MY; y++) for (let x = 0; x < MX; x++)
+      fillRect(ox + x * m, oy + y * m, m, m, MAP[y][x] ? rgb(120, 52, 38) : rgb(22, 19, 28));
+    for (const z of G.zombies) fillRect(ox + z.x / S * m - 1, oy + z.y / S * m - 1, 2, 2, rgb(235, 40, 30));
+    fillRect(ox + p.x / S * m - 1, oy + p.y / S * m - 1, 2, 2, rgb(255, 230, 60));
+    fillRect(ox + (p.x + dX * 14) / S * m, oy + (p.y + dY * 14) / S * m, 1, 1, rgb(255, 230, 60));
+  }
+
+  // HUD strip
+  fillRect(0, VH, W, H - VH, rgb(20, 15, 24));
+  fillRect(0, VH, W, 1, rgb(110, 22, 18));
+  fillRect(6, VH + 19, 70, 6, rgb(60, 12, 12));
+  fillRect(6, VH + 19, 70 * p.hp / 100, 6, rgb(220, 40, 35));
+
+  ctx.putImageData(img, 0, 0);
+
+  // Red flash when hurt, pulse when low
+  let red = G.hurt * 0.55;
+  if (p.alive && p.hp < 40) red = Math.max(red, 0.12 + 0.08 * Math.sin(G.time * 6));
+  if (red > 0) { ctx.fillStyle = `rgba(200,0,0,${red})`; ctx.fillRect(0, 0, W, VH); }
+
+  // Text
+  ctx.font = '8px "Press Start 2P", monospace';
+  ctx.textBaseline = "top";
+  text(`RND ${G.round}`, 6, VH + 6, "#e0352c");
+  text(`${p.points}`, 92, VH + 6, "#f2c14e");
+  text(`KILLS ${p.kills}`, 92, VH + 18, "#8d8496");
+  let ammo = `${G.mag}/${G.reserve}`, ac2 = "#e9e2d4";
+  if (G.reload > 0) { ammo = "RELOAD"; ac2 = "#8d8496"; }
+  else if (G.mag === 0 && G.reserve === 0) { ammo = "NO AMMO"; ac2 = "#e0352c"; }
+  else if (G.mag === 0) { ammo = "PRESS R"; ac2 = "#e0352c"; }
+  text(ammo, W - 6 - ammo.length * 8, VH + 6, ac2);
+  const left = `LEFT ${remaining()}`;
+  text(left, W - 6 - left.length * 8, VH + 18, "#8d8496");
+
+  if (G.state === "over") {
+    ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0, 0, W, VH);
+    centered("GAME OVER", 52, "#e0352c");
+    centered(`YOU MADE IT TO ROUND ${G.round}`, 76, "#e9e2d4");
+    centered(`BEST: ROUND ${best}`, 92, "#f2c14e");
+    centered(touch ? "TAP FIRE TO RETRY" : "PRESS ENTER TO RETRY", 120, "#e9e2d4");
+  } else if (G.roundBreak > 0) {
+    centered(G.round === 0 ? "GET READY..." : `ROUND ${G.round} SURVIVED`, 30, "#e0352c");
+  }
+}
+function text(s, x, y, color) {
+  ctx.fillStyle = "#000"; ctx.fillText(s, x + 1, y + 1);
+  ctx.fillStyle = color; ctx.fillText(s, x, y);
+}
+function centered(s, y, color) { text(s, Math.round(W / 2 - s.length * 4), y, color); }
+
+// ---------------------------------------------------------------- input
+const keys = {};
+const touch = matchMedia("(hover: none), (pointer: coarse)").matches;
+const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e",
+  ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", ShiftLeft: "shift", ShiftRight: "shift" };
+
+function restart() { G = newGame(); }
+
+addEventListener("keydown", e => {
+  if (!started) return;
+  ensureAudio();
+  const k = KEYMAP[e.code];
+  if (k) keys[k] = true;
+  if (e.code === "Space") { if (!e.repeat) fire(); }
+  else if (e.code === "KeyR") startReload();
+  else if (e.code === "KeyM") showMap = !showMap;
+  else if (e.code === "Enter" && G.state === "over") restart();
+  else if (!k) return;
+  e.preventDefault();
+});
+addEventListener("keyup", e => { const k = KEYMAP[e.code]; if (k) keys[k] = false; });
+addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+
+canvas.addEventListener("mousedown", e => {
+  if (!started || e.button !== 0) return;
+  ensureAudio();
+  if (G.state === "over") { restart(); return; }
+  if (!touch && document.pointerLockElement !== canvas) lockMouse();
+  else fire();
+});
+addEventListener("mousemove", e => {
+  if (document.pointerLockElement === canvas && G.state === "play" && G.p.alive)
+    G.p.a = ((G.p.a - e.movementX * 0.15) % 360 + 360) % 360;
+});
+function lockMouse() {
+  try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+}
+
+for (const b of document.querySelectorAll(".pad button")) {
+  const k = b.dataset.k;
+  const down = e => {
+    e.preventDefault(); ensureAudio(); b.classList.add("on");
+    if (!started) begin();
+    if (k === "fire") { if (G.state === "over") restart(); else fire(); }
+    else if (k === "reload") startReload();
+    else keys[k] = true;
+  };
+  const up = () => { b.classList.remove("on"); if (k !== "fire" && k !== "reload") keys[k] = false; };
+  b.addEventListener("pointerdown", down);
+  b.addEventListener("pointerup", up);
+  b.addEventListener("pointercancel", up);
+  b.addEventListener("pointerleave", up);
+}
+
+const startBtn = document.getElementById("start");
+if (touch) document.getElementById("startHint").textContent = "Tap to play. Use the buttons below the screen.";
+function begin() {
+  started = true;
+  startBtn.hidden = true;
+  ensureAudio();
+  if (!touch) lockMouse();
+}
+startBtn.addEventListener("click", begin);
+
+// ---------------------------------------------------------------- loop
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min((now - last) / 1000, 0.05); // a hiccup must not teleport anyone
+  last = now;
+  if (started) update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+function boot(data) {
+  if (data && data.G) { G = data.G; started = !!data.started; showMap = data.showMap !== false; startBtn.hidden = started; }
+  loadSprites().then(() => requestAnimationFrame(loop));
+}
+const hot = window.claude && window.claude.hot;
+if (hot && hot.snapshot) hot.snapshot(() => ({ G, started, showMap }));
+if (hot && hot.ready) hot.ready(boot); else boot(hot && hot.data ? hot.data : {});
+})();
+</script>

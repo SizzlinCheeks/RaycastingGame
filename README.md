@@ -4,6 +4,10 @@ A Call of Duty Zombies–style survival game drawn with an old-school raycaster
 (like Wolfenstein 3D), in C with GLUT/OpenGL and SDL2. You can play solo or
 with a friend over the network.
 
+## Play in the browser
+
+`web/index.html` is a single-file JavaScript version of the game (solo only). Open it in any browser, no build needed.
+
 ## Build
 
 **macOS** (Homebrew):
