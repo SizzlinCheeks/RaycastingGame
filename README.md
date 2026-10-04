@@ -8,6 +8,10 @@ with a friend over the network.
 
 `web/index.html` is a single-file JavaScript version of the game (solo only). Open it in any browser, no build needed.
 
+The browser version has a bigger 40×30 map split into six areas. You buy doors to open new areas, and you buy weapons
+chalked on the walls (M14, Olympia, MP40, STG-44, Trench Gun, Ray Gun). Look at a door or a chalk drawing and press **F**.
+You carry two weapons, and **1 / 2** or the mouse wheel switches between them.
+
 ## Build
 
 **macOS** (Homebrew):

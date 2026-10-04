@@ -101,7 +101,8 @@ canvas {
 .dpad [data-k="down"] { grid-column: 2; grid-row: 2; }
 .dpad [data-k="right"] { grid-column: 3; grid-row: 2; }
 .actions { display: flex; gap: 10px; align-items: center; }
-.actions [data-k="reload"] { width: 56px; height: 56px; }
+.actions .small { display: grid; grid-template-columns: repeat(3, 56px); gap: 6px; }
+.actions .small button { height: 48px; font-size: 10px; }
 .actions .fire { width: 92px; height: 92px; border-radius: 50%; background: #5a1512; border-color: #2a0907; color: var(--gold); }
 @media (hover: none), (pointer: coarse) { .pad { display: flex; } }
 
@@ -123,7 +124,7 @@ canvas {
 <div class="wrap">
   <header>
     <h1>8-BIT ZOMBIES</h1>
-    <p>Survive the rounds. Ammo refills when a new round starts.</p>
+    <p>Buy doors to open new areas. Buy weapons off the walls.</p>
   </header>
 
   <div class="screen">
@@ -142,7 +143,11 @@ canvas {
       <button type="button" data-k="right" aria-label="Turn right">▶</button>
     </div>
     <div class="actions">
-      <button type="button" data-k="reload" aria-label="Reload">R</button>
+      <div class="small">
+        <button type="button" data-k="buy" aria-label="Buy or open door">BUY</button>
+        <button type="button" data-k="swap" aria-label="Switch weapon">SWAP</button>
+        <button type="button" data-k="reload" aria-label="Reload">R</button>
+      </div>
       <button type="button" data-k="fire" class="fire" aria-label="Fire">FIRE</button>
     </div>
   </div>
@@ -152,12 +157,14 @@ canvas {
     <div><dt>A D ← →</dt><dd>turn (or the mouse)</dd></div>
     <div><dt>Q E</dt><dd>strafe</dd></div>
     <div><dt>SHIFT</dt><dd>sprint</dd></div>
-    <div><dt>SPACE</dt><dd>shoot (or click)</dd></div>
+    <div><dt>SPACE</dt><dd>shoot (or click, hold for automatics)</dd></div>
     <div><dt>R</dt><dd>reload</dd></div>
+    <div><dt>F</dt><dd>buy a weapon or open a door</dd></div>
+    <div><dt>1 2 WHEEL</dt><dd>switch weapon</dd></div>
     <div><dt>M</dt><dd>show/hide the map</dd></div>
     <div><dt>ENTER</dt><dd>restart after game over</dd></div>
   </dl>
-  <p class="note">10 points for a hit, 60 for a kill. Every round brings more zombies, and they get tougher and faster. Co-op needs the downloadable version, because browsers can't open the network connection it uses.</p>
+  <p class="note">10 points for a hit, 60 for a kill. Look at a door or a chalk drawing on a wall and press F to buy it. You can carry two weapons, and buying a third replaces the one in your hands. Buying from a gun's wall again refills its ammo for half price. Your pistol ammo refills every round. Co-op needs the downloadable version, because browsers can't open the network connection it uses.</p>
 </div>
 
 <script>
@@ -166,42 +173,95 @@ canvas {
 // ---------------------------------------------------------------- constants
 const W = 320, H = 200, VH = 168, HOR = VH / 2;
 const FOV = 60, PLANE = Math.tan(FOV / 2 * Math.PI / 180), PROJ = (W / 2) / PLANE;
-const S = 32, MX = 20, MY = 20;            // cell size, map size
+const S = 32;                                  // world units per map cell
 const PLAYER_R = 8, ZOMBIE_R = 8, SPEED = 80, SPRINT = 1.6, TURN = 120;
-const MAG = 12, RESERVE = 240, FIRE_DELAY = 0.22, RELOAD = 1.2, DAMAGE = 50, MAX_Z = 24;
+const MAX_Z = 24, REACH = 44;                  // zombies alive at once, buy/open distance
 const SPR_RED = 0, SPR_GREEN = 1, SPR_GNOME = 3;
 
-const MAP = [
-  "11111111111111111111",
-  "10000000000000000001",
-  "10011111000001111101",
-  "10010000000001000101",
-  "10010001000001000101",
-  "10010001000001101101",
-  "10011111000000000001",
-  "10000000000000000001",
-  "10000000000000000001",
-  "10000000000000000001",
-  "10111111110000000001",
-  "10100000000000000001",
-  "10100100010000000001",
-  "10100100010000000001",
-  "10100100010000000001",
-  "10111111110000000001",
-  "10000000000000000001",
-  "10000000000000000001",
-  "10000000000000000001",
-  "11111111111111111111",
-].map(r => [...r].map(Number));
-const SPAWNS = [[1,1],[18,1],[10,1],[1,9],[18,9],[10,8],[1,18],[18,18],[4,12],[15,3]];
+// # wall   . floor   A-F door   Z zombie spawn   P player start
+// lowercase = weapon chalked on a wall (see BUYS)
+const MAP_TXT = [
+  "######t#############r############g######",
+  "#Z...........#.Z........Z.#...........Z#",
+  "#............#............#............#",
+  "#............E...##..##...F............#",
+  "#............E............F............#",
+  "#....##......#............#.....##.....#",
+  "#....##......#............#.....##.....#",
+  "#............##############............#",
+  "#............#Z..........Z#............#",
+  "#............#............#............#",
+  "#...........Z#............#Z...........#",
+  "#............#............#............#",
+  "#............#...#....#...#............#",
+  "#####CC#######............######DD######",
+  "#Z...........#............#...........Z#",
+  "#............#............#............#",
+  "#............#............#............#",
+  "#............#...#....#...#............#",
+  "s............#............#............p",
+  "#............#............#............#",
+  "#............A............B............#",
+  "#..######....A............B....######..#",
+  "#............#...#....#...#............#",
+  "#............#............#............#",
+  "#............#............#............#",
+  "#............#.....PP.....#............#",
+  "#............#............#............#",
+  "#............#............#............#",
+  "#Z..........Z#Z..........Z#Z..........Z#",
+  "#################m######################",
+];
+const MW = MAP_TXT[0].length, MH = MAP_TXT.length;
+const DOORS = { A: 750, B: 1000, C: 1250, D: 1250, E: 1500, F: 1500 };
+const BUYS = { m: "m14", s: "olympia", p: "mp40", t: "trench", g: "stg", r: "raygun" };
+
+const WEAPONS = {
+  m1911:   { name: "M1911",      cost: 0,    dmg: 50,  mag: 8,  res: 80,  delay: 0.25, reload: 1.2, art: "pistol" },
+  m14:     { name: "M14",        cost: 500,  dmg: 110, mag: 8,  res: 96,  delay: 0.22, reload: 1.6, art: "rifle" },
+  olympia: { name: "OLYMPIA",    cost: 500,  dmg: 45,  mag: 2,  res: 38,  delay: 0.45, reload: 2.0, art: "shotgun", pellets: 7, spread: 6 },
+  mp40:    { name: "MP40",       cost: 1000, dmg: 45,  mag: 32, res: 192, delay: 0.1,  reload: 1.8, art: "smg", auto: true },
+  stg:     { name: "STG-44",     cost: 1200, dmg: 75,  mag: 30, res: 180, delay: 0.11, reload: 2.0, art: "stg", auto: true },
+  trench:  { name: "TRENCH GUN", cost: 1500, dmg: 70,  mag: 6,  res: 60,  delay: 0.35, reload: 2.2, art: "pump", pellets: 8, spread: 5 },
+  raygun:  { name: "RAY GUN",    cost: 5000, dmg: 400, mag: 20, res: 160, delay: 0.3,  reload: 2.5, art: "ray", splash: 48 },
+};
 const SPRITE_SRC = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAABcElEQVRYCeVUW3LDIAyETg+UXqo5U3up5kbUS7wykWWERWbyEWY8gB67iwRO6d1HnixA6eQPYQ8FHZCUn3Sprmu6Ja4ZC9syXHw3gIBqFnLaoyI+CPCqOVKB3el74r1WfPaSR3zf5U/CfvNX4j7nvLsXEtgsplsAImuU0nsgW8a0gFGijfJxNS0AZcfHofe0H83TAggM4vXCVVMrijHWbDfQitxs0lz989lC7ivvBSAqUgFTNE+PmWstyNpHBFg4YZt5GgdNWuDEwe3in6kAiOUvaPVf2VxyKBz9Ewqx0V8hWnxtHASLD2TWOFMBKx+2My3ZYfQUCjBK255clZo+YtU8nbMw0/8gwjTiVC3JSt7GVn8jqvWRwMOocZEWCDBErkKlWmR/xgxQfhoPIujrkbsxvVdglVULwb4X1/NVrEgLLBFhW0SALjnLHBLhlkihygVUdv0UtftwH6nAIVjE8XIBZ1uAQ+o7wINHsJj7xvM/DfRcfCZqpsIAAAAASUVORK5CYII=", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAABdElEQVRYCeVUW1LDMAxMGE4C16FwVqDXaa+SZk1WcRVFcmRm+lHPZGzrsbuW7AzDs4+xswCTk9+E3RS0QzK9fX8U1/XrPHDNWNjmEeKHAQRUs5DTnhXxQoBHzZkKbE7viY9a8eolt/gun78S9v5zGrgfx3FzLySwWnS3AETWmCbvgawZ3QJaiVbK+1W3AJQdH4fe0743dwsgMIiXC1dMtSjGWLPdQCtytUlz9c9nDflbRS8AUZkKmKJ5esxca0HWPiPAwknbzNMEaNKCIA7uEP9IBUAsf0Gr/8oWkkNh659QiI3+CtHsq+MgWHwgs8aRClj5sB1pyQbDUyjAKG19clVq+ohV8nTOzEz/nQjTiFPVJAt5HVv8lajaR4IIo8RlWiDAELkIlWqR/T9mgPLTeBBBn0cexnivwCqrFoK9F+f5ClamBZaItC0jQJecZU6JCEukUOUCKrt+itq9u89UYBcs43i4gKMtwCH1HeDBM1jMfeL5BsCGcywlraZqAAAAAElFTkSuQmCC", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAABeklEQVRYCeVVMW7DMAxUi76ge8bOyZT+qHlT8qN2SuaO2fuF1BR8BM1QpEUbyBABAU0edTyRllPKs6+XhQ24Oftncc9KahS5bffHCl1+DgXPyKXYsEL+MAGEynJxxLMiXkHwKJvpwN3pPfHRKN68zXOw8/cXp+0+T0X7DDYeVhvB3+ZjUkL7E1A4qwl4v/4K2lK0PwGFs1gAtZ1+WNpHvGUXCwAxFR5fuBqSopBj2dQtAJH++CAOG90Ayst0wBSN05PFM4R4NiPA4+vGzNMELN4fkN4a8vd0gArzV9Cav4qFxUnt3C8hFzbmy4UGTOaRYMaomLV6OmDtp1jPSO44PIVMTK2VJ1etBgauuk/vGSoDn4gwg3QqWWQsLnMrLkRJDAUijpqXGQETk8hRKHcL1dewRIqf5iMRwLziYY53C6y2aiHke3keVrkyI7BEpGMZAbrlaHNKRNgixcovoIrrq6jhpp/pQJMsAzxcQO8I6JD6HcDBM1zY+8T2H0zBcidKmJgGAAAAAElFTkSuQmCC", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAABUElEQVRYCe1VMU7EMBAMfOF+QHkPyROQ7m+IlvL6PIQKUeUL1EfG8qzs5WLPJoiGRDqtY8/OjDde3zAcz3+vwMPGAtyKvK0ciSKanITHcTT9aZpsvAyifKGEWylcqnJcmJGNqMCuOE0gZiMStwJK4m/vn6ZxOT/ZmAO/rpp4JIEST/PHcE8cuZhfW2txywbWyK+vzxU/cOruq8TGC04+PkOKX/NLFTGPH+YZgW/whZcqYhrx0RsLqzQSbHcLxiqBcc5JFfGGGnzhpSSQBcuxJzJDNOMBW98pquZH8V1e7qwLLAByTq8N8c3BKxMCG8mRbsK8swgWKQp+6FWgJOpVAd2SvWriBCsxteICpAlG5latysnfiqn30VpsL146WQBmbC0qqnwnHqof3Ljz84HbfP8rBiDsS27CWNzz56MagI5/SlN7eDzv8X5U4KjA31bgG4dCrYRAQxBnAAAAAElFTkSuQmCC"];
 
 const rad = d => d * Math.PI / 180;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const center = c => (c + 0.5) * S;
 
-// ---------------------------------------------------------------- map helpers
-const wallAt = (cx, cy) => cx < 0 || cy < 0 || cx >= MX || cy >= MY || MAP[cy][cx] > 0;
+// ---------------------------------------------------------------- map
+// tile: 0 floor, 1 wall, 2 closed door, 3 wall buy
+const tile = new Uint8Array(MW * MH);
+const cellChar = i => MAP_TXT[Math.floor(i / MW)][i % MW];
+const spawns = [], starts = [];
+for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+  const c = MAP_TXT[y][x];
+  if (c === "Z") spawns.push([x, y]);
+  if (c === "P") starts.push([x, y]);
+}
+let activeSpawns = [];
+
+function rebuildTiles() {
+  for (let i = 0; i < MW * MH; i++) {
+    const c = cellChar(i);
+    if (c === "#") tile[i] = 1;
+    else if (DOORS[c] !== undefined) tile[i] = G.opened.includes(c) ? 0 : 2;
+    else if (BUYS[c]) tile[i] = 3;
+    else tile[i] = 0;
+  }
+  // Zombies only climb out in areas you can reach
+  const seen = new Uint8Array(MW * MH), q = [starts[0][1] * MW + starts[0][0]];
+  seen[q[0]] = 1;
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h];
+    for (const n of [i + 1, i - 1, i + MW, i - MW]) if (!seen[n] && tile[n] === 0) { seen[n] = 1; q.push(n); }
+  }
+  activeSpawns = spawns.filter(([x, y]) => seen[y * MW + x]);
+}
+
+const wallAt = (cx, cy) => cx < 0 || cy < 0 || cx >= MW || cy >= MH || tile[cy * MW + cx] !== 0;
 const isWall = (x, y) => wallAt(Math.floor(x / S), Math.floor(y / S));
 const collides = (x, y, r) => isWall(x - r, y - r) || isWall(x + r, y - r) || isWall(x - r, y + r) || isWall(x + r, y + r);
 function move(o, dx, dy, r) {
@@ -210,7 +270,7 @@ function move(o, dx, dy, r) {
 }
 
 // DDA ray cast. Hit point = origin + rayT * dir. With a unit dir, rayT is the distance.
-let rayT = 0, raySide = 0, rayU = 0;
+let rayT = 0, raySide = 0, rayU = 0, rayCell = 0;
 function raycast(ox, oy, dx, dy) {
   const px = ox / S, py = oy / S;
   let mx = Math.floor(px), my = Math.floor(py);
@@ -219,70 +279,77 @@ function raycast(ox, oy, dx, dy) {
   let tx = dx < 0 ? (px - mx) * ddx : (mx + 1 - px) * ddx;
   let ty = dy < 0 ? (py - my) * ddy : (my + 1 - py) * ddy;
   let side = 0;
-  for (let i = 0; i < 64; i++) {
+  for (let i = 0; i < MW + MH + 2; i++) {
     if (tx < ty) { tx += ddx; mx += sx; side = 0; } else { ty += ddy; my += sy; side = 1; }
     if (wallAt(mx, my)) break;
   }
   const t = side === 0 ? tx - ddx : ty - ddy;
   const w = side === 0 ? py + t * dy : px + t * dx;
   rayT = t * S; raySide = side; rayU = w - Math.floor(w);
+  rayCell = clamp(my, 0, MH - 1) * MW + clamp(mx, 0, MW - 1);
   return rayT;
 }
 
 // ---------------------------------------------------------------- game state
+const newGun = id => ({ id, mag: WEAPONS[id].mag, res: WEAPONS[id].res });
 function newGame() {
   return {
     state: "play", round: 0, toSpawn: 0, spawnTimer: 0, roundBreak: 2.5, time: 0,
-    p: { x: center(10), y: center(17), a: 90, hp: 100, alive: true, points: 500, kills: 0, lastHurt: -100, regen: 0 },
-    zombies: [],
-    mag: MAG, reserve: RESERVE, fireCd: 0, reload: 0, flash: 0, hurt: 0, hit: 0,
+    p: { x: center(starts[0][0]) + 16, y: center(starts[0][1]), a: 90, hp: 100, alive: true, points: 500, kills: 0, lastHurt: -100, regen: 0 },
+    zombies: [], opened: [],
+    guns: [newGun("m1911")], cur: 0,
+    fireCd: 0, reload: 0, swap: 0, flash: 0, hurt: 0, hit: 0, msg: "", msgT: 0,
   };
 }
 let G = newGame();
 let best = 0;
 try { best = Number(localStorage.getItem("zombies-best")) || 0; } catch (e) {}
-let showMap = true, started = false;
+let showMap = true, started = false, fireHeld = false, target = null;
 
+const gun = () => G.guns[G.cur];
+const weapon = () => WEAPONS[gun().id];
 const remaining = () => G.toSpawn + G.zombies.length;
+function say(text) { G.msg = text; G.msgT = 1.6; }
 
 // Distance (in cells) from every cell to the player. Zombies walk downhill on it.
-const flow = new Int16Array(MX * MY);
+const flow = new Int16Array(MW * MH);
 function buildFlow() {
   flow.fill(9999);
-  const q = [];
   const cx = Math.floor(G.p.x / S), cy = Math.floor(G.p.y / S);
   if (!G.p.alive || wallAt(cx, cy)) return;
-  flow[cy * MX + cx] = 0; q.push(cx, cy);
-  for (let h = 0; h < q.length; h += 2) {
-    const x = q[h], y = q[h + 1], d = flow[y * MX + x] + 1;
-    for (const [ox, oy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-      const nx = x + ox, ny = y + oy;
-      if (wallAt(nx, ny) || flow[ny * MX + nx] <= d) continue;
-      flow[ny * MX + nx] = d; q.push(nx, ny);
+  const q = [cy * MW + cx];
+  flow[q[0]] = 0;
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h], d = flow[i] + 1;
+    for (const n of [i + 1, i - 1, i + MW, i - MW]) {
+      if (tile[n] !== 0 || flow[n] <= d) continue;
+      flow[n] = d; q.push(n);
     }
   }
 }
 
 function spawnZombie() {
-  if (G.zombies.length >= MAX_Z) return;
-  let pick = SPAWNS[Math.floor(Math.random() * SPAWNS.length)];
-  for (let i = 0; i < 20; i++) {
-    const s = SPAWNS[Math.floor(Math.random() * SPAWNS.length)];
-    if (Math.hypot(center(s[0]) - G.p.x, center(s[1]) - G.p.y) > 6 * S) { pick = s; break; }
-  }
+  if (G.zombies.length >= MAX_Z || !activeSpawns.length) return;
+  // Prefer spawns that are close enough to matter but not on top of you
+  const dist = s => Math.hypot(center(s[0]) - G.p.x, center(s[1]) - G.p.y) / S;
+  let pool = activeSpawns.filter(s => dist(s) > 6 && dist(s) < 22);
+  if (!pool.length) pool = activeSpawns.filter(s => dist(s) > 4);
+  if (!pool.length) pool = activeSpawns;
+  const pick = pool[Math.floor(Math.random() * pool.length)];
   const kinds = [SPR_RED, SPR_GREEN, SPR_GREEN, SPR_GNOME];
   G.zombies.push({
     x: center(pick[0]) + Math.random() * 8 - 4, y: center(pick[1]) + Math.random() * 8 - 4,
-    hp: 100 + 40 * (G.round - 1), spr: kinds[Math.floor(Math.random() * 4)], cd: 0.5, flash: 0,
+    hp: 100 + 50 * (G.round - 1), spr: kinds[Math.floor(Math.random() * 4)], cd: 0.5, flash: 0, dead: false,
   });
   G.toSpawn--;
 }
 
 function startRound() {
   G.round++;
-  G.toSpawn = 5 + 3 * G.round;
+  G.toSpawn = 6 + 3 * G.round;
   G.spawnTimer = 0;
-  G.reserve = RESERVE;  // max ammo every round
+  const pistol = G.guns.find(g => g.id === "m1911");
+  if (pistol) pistol.res = WEAPONS.m1911.res;   // free pistol ammo each round
   sfx.round();
 }
 
@@ -301,14 +368,14 @@ function moveZombie(z, dt) {
   }
   let gx = p.x, gy = p.y;
   const cx = Math.floor(z.x / S), cy = Math.floor(z.y / S);
-  const canSee = raycast(z.x, z.y, dx / dist, dy / dist) > dist;
+  const canSee = dist < 12 * S && raycast(z.x, z.y, dx / dist, dy / dist) > dist;
   if (!canSee && !wallAt(cx, cy)) {
-    let bestD = flow[cy * MX + cx];
+    let bestD = flow[cy * MW + cx];
     for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
       const nx = cx + ox, ny = cy + oy;
       if ((!ox && !oy) || wallAt(nx, ny)) continue;
       if (ox && oy && (wallAt(cx + ox, cy) || wallAt(cx, cy + oy))) continue; // no corner cutting
-      if (flow[ny * MX + nx] < bestD) { bestD = flow[ny * MX + nx]; gx = center(nx); gy = center(ny); }
+      if (flow[ny * MW + nx] < bestD) { bestD = flow[ny * MW + nx]; gx = center(nx); gy = center(ny); }
     }
   }
   dx = gx - z.x; dy = gy - z.y;
@@ -318,44 +385,115 @@ function moveZombie(z, dt) {
   move(z, dx / len * sp, dy / len * sp, ZOMBIE_R);
 }
 
-function fire() {
-  const p = G.p;
-  if (!p.alive || G.state !== "play" || G.reload > 0 || G.fireCd > 0) return;
-  if (G.mag === 0) { startReload(); return; }
-  G.mag--; G.fireCd = FIRE_DELAY; G.flash = 0.08;
-  sfx.shoot();
+// ---------------------------------------------------------------- weapons
+let hitThisShot = false;
+function damage(z, amount) {
+  if (z.dead) return;
+  z.hp -= amount; z.flash = 0.15;
+  G.p.points += 10; G.hit = 0.15; hitThisShot = true;
+  if (z.hp <= 0) { z.dead = true; G.p.points += 60; G.p.kills++; }
+}
 
-  const dX = Math.cos(rad(p.a)), dY = -Math.sin(rad(p.a)), rX = -dY, rY = dX;
-  let hitZ = null, hitD = raycast(p.x, p.y, dX, dY);
+function shootRay(angle, wp) {
+  const p = G.p;
+  const dX = Math.cos(rad(angle)), dY = -Math.sin(rad(angle)), rX = -dY, rY = dX;
+  const wallD = raycast(p.x, p.y, dX, dY);
+  let hitZ = null, hitD = wallD;
   for (const z of G.zombies) {
+    if (z.dead) continue;
     const ox = z.x - p.x, oy = z.y - p.y;
     const depth = ox * dX + oy * dY, side = ox * rX + oy * rY;
     if (depth > 0 && depth < hitD && Math.abs(side) < ZOMBIE_R + 1) { hitZ = z; hitD = depth; }
   }
-  if (!hitZ) return;
-  hitZ.hp -= DAMAGE; hitZ.flash = 0.15; p.points += 10; G.hit = 0.15; sfx.hit();
-  if (hitZ.hp <= 0) {
-    G.zombies.splice(G.zombies.indexOf(hitZ), 1);
-    p.points += 60; p.kills++;
-  }
+  if (wp.splash) {
+    // Ray gun: blast everything near the impact point
+    const ix = p.x + dX * (hitD - 2), iy = p.y + dY * (hitD - 2);
+    for (const z of G.zombies) if (Math.hypot(z.x - ix, z.y - iy) < wp.splash) damage(z, z === hitZ ? wp.dmg : wp.dmg / 2);
+  } else if (hitZ) damage(hitZ, wp.dmg);
+}
+
+function tryFire() {
+  const p = G.p, g = gun(), wp = weapon();
+  if (!p.alive || G.state !== "play" || G.reload > 0 || G.fireCd > 0 || G.swap > 0) return;
+  if (g.mag === 0) { if (g.res > 0) startReload(); else if (!wp.auto || !G.dryClick) { sfx.deny(); G.dryClick = true; } return; }
+  g.mag--; G.fireCd = wp.delay; G.flash = 0.08;
+  wp.splash ? sfx.ray() : wp.pellets ? sfx.shotgun() : sfx.shoot();
+  hitThisShot = false;
+  const n = wp.pellets || 1;
+  for (let i = 0; i < n; i++) shootRay(p.a + (n > 1 ? (Math.random() * 2 - 1) * wp.spread : 0), wp);
+  if (hitThisShot) sfx.hit();
+  G.zombies = G.zombies.filter(z => !z.dead);
 }
 
 function startReload() {
-  if (G.reload <= 0 && G.mag < MAG && G.reserve > 0 && G.p.alive) { G.reload = RELOAD; sfx.reload(); }
+  const g = gun(), wp = weapon();
+  if (G.reload <= 0 && G.swap <= 0 && g.mag < wp.mag && g.res > 0 && G.p.alive) { G.reload = wp.reload; sfx.reload(); }
 }
 
+function switchGun(to) {
+  if (G.guns.length < 2 || !G.p.alive) return;
+  const next = to === undefined ? 1 - G.cur : to;
+  if (next === G.cur || next >= G.guns.length) return;
+  G.cur = next; G.reload = 0; G.swap = 0.35; sfx.swap();
+}
+
+// What are we looking at? A door or a chalk weapon within arm's reach.
+function findTarget() {
+  const p = G.p;
+  for (const off of [0, -18, 18]) {
+    const a = rad(p.a + off);
+    const d = raycast(p.x, p.y, Math.cos(a), -Math.sin(a));
+    if (d > REACH) continue;
+    const c = cellChar(rayCell);
+    if (tile[rayCell] === 2) return { kind: "door", key: c, cost: DOORS[c] };
+    if (tile[rayCell] === 3) {
+      const id = BUYS[c], owned = G.guns.findIndex(g => g.id === id);
+      return { kind: "gun", id, owned, cost: owned >= 0 ? WEAPONS[id].cost / 2 : WEAPONS[id].cost };
+    }
+  }
+  return null;
+}
+
+function interact() {
+  const t = target, p = G.p;
+  if (!t || !p.alive || G.state !== "play") return;
+  if (t.owned >= 0 && t.kind === "gun") {
+    const g = G.guns[t.owned], wp = WEAPONS[t.id];
+    if (g.res === wp.res && g.mag === wp.mag) { say("AMMO FULL"); return; }
+  }
+  if (p.points < t.cost) { say("NOT ENOUGH POINTS"); sfx.deny(); return; }
+  p.points -= t.cost;
+  sfx.buy();
+  if (t.kind === "door") {
+    G.opened.push(t.key);
+    rebuildTiles();
+    say("DOOR OPENED");
+  } else if (t.owned >= 0) {
+    Object.assign(G.guns[t.owned], newGun(t.id));
+    say(WEAPONS[t.id].name + " AMMO");
+  } else {
+    if (G.guns.length < 2) { G.guns.push(newGun(t.id)); G.cur = G.guns.length - 1; }
+    else G.guns[G.cur] = newGun(t.id);   // two guns max: swap out the one in your hands
+    G.reload = 0; G.swap = 0.35;
+    say("GOT THE " + WEAPONS[t.id].name);
+  }
+}
+
+// ---------------------------------------------------------------- update
 function update(dt) {
   const p = G.p;
   G.time += dt;
-  for (const k of ["flash", "hurt", "hit", "fireCd"]) if (G[k] > 0) G[k] -= dt;
+  for (const k of ["flash", "hurt", "hit", "fireCd", "swap", "msgT"]) if (G[k] > 0) G[k] -= dt;
   if (G.reload > 0) {
     G.reload -= dt;
     if (G.reload <= 0) {
-      const take = Math.min(MAG - G.mag, G.reserve);
-      G.mag += take; G.reserve -= take; G.reload = 0;
+      const g = gun(), take = Math.min(weapon().mag - g.mag, g.res);
+      g.mag += take; g.res -= take; G.reload = 0;
     }
   }
   if (G.state !== "play") return;
+  if (!fireHeld) G.dryClick = false;
+  if (fireHeld && weapon().auto) tryFire();
 
   // Player
   let turn = 0;
@@ -366,10 +504,11 @@ function update(dt) {
   const fwd = (keys.w || keys.up ? 1 : 0) - (keys.s || keys.down ? 1 : 0);
   const str = (keys.e ? 1 : 0) - (keys.q ? 1 : 0);
   const mx = dX * fwd + rX * str, my = dY * fwd + rY * str, len = Math.hypot(mx, my);
-  if (len > 0) {
+  if (len > 0 && p.alive) {
     const sp = SPEED * (keys.shift ? SPRINT : 1) * dt / len;
     move(p, mx * sp, my * sp, PLAYER_R);
   }
+  target = p.alive ? findTarget() : null;
 
   // Rounds
   if (G.roundBreak > 0) {
@@ -377,8 +516,8 @@ function update(dt) {
     if (G.roundBreak <= 0) startRound();
   } else {
     G.spawnTimer -= dt;
-    if (G.toSpawn > 0 && G.spawnTimer <= 0) { spawnZombie(); G.spawnTimer = Math.max(0.4, 2 - G.round * 0.1); }
-    if (remaining() === 0) G.roundBreak = 6;
+    if (G.toSpawn > 0 && G.spawnTimer <= 0) { spawnZombie(); G.spawnTimer = Math.max(0.35, 1.8 - G.round * 0.1); }
+    if (remaining() === 0) G.roundBreak = 8;
   }
 
   // Zombies
@@ -412,46 +551,78 @@ function ensureAudio() {
   if (ac) { if (ac.state === "suspended") ac.resume(); return; }
   try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; }
 }
-function tone(type, f0, f1, dur, vol) {
+function tone(type, f0, f1, dur, vol, delay = 0) {
   if (!ac) return;
-  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain();
   o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
   o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur);
 }
-function noise(dur, vol) {
+function noise(dur, vol, step) {
   if (!ac) return;
   const n = Math.floor(ac.sampleRate * dur), b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
   let v = 0;
-  for (let i = 0; i < n; i++) { if (i % 8 === 0) v = Math.random() < 0.5 ? -1 : 1; d[i] = v * (1 - i / n) ** 2; }
+  for (let i = 0; i < n; i++) { if (i % step === 0) v = Math.random() < 0.5 ? -1 : 1; d[i] = v * (1 - i / n) ** 2; }
   const s = ac.createBufferSource(), g = ac.createGain();
   s.buffer = b; g.gain.value = vol; s.connect(g).connect(ac.destination); s.start();
 }
 const sfx = {
-  shoot: () => noise(0.18, 0.35),
+  shoot: () => noise(0.16, 0.3, 8),
+  shotgun: () => noise(0.35, 0.45, 14),
+  ray: () => tone("square", 1400, 200, 0.25, 0.12),
   hit: () => tone("square", 880, 660, 0.05, 0.08),
   hurt: () => tone("square", 220, 90, 0.3, 0.15),
-  reload: () => { tone("square", 300, 300, 0.04, 0.06); setTimeout(() => tone("square", 450, 450, 0.04, 0.06), 900); },
-  round: () => { tone("square", 196, 196, 0.25, 0.08); setTimeout(() => tone("square", 147, 147, 0.5, 0.08), 260); },
+  reload: () => { tone("square", 300, 300, 0.04, 0.06); tone("square", 450, 450, 0.04, 0.06, 0.8); },
+  swap: () => tone("square", 500, 700, 0.06, 0.05),
+  buy: () => { tone("square", 660, 660, 0.08, 0.08); tone("square", 990, 990, 0.12, 0.08, 0.09); },
+  deny: () => tone("square", 120, 100, 0.15, 0.1),
+  round: () => { tone("square", 196, 196, 0.25, 0.08); tone("square", 147, 147, 0.5, 0.08, 0.26); },
   over: () => tone("sawtooth", 160, 40, 1.2, 0.12),
 };
 
-// ---------------------------------------------------------------- textures
+// ---------------------------------------------------------------- textures (32x32, one per wall face)
 const rgb = (r, g, b) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
-const brick = { r: new Uint8Array(256), g: new Uint8Array(256), b: new Uint8Array(256) };
-(() => {
-  const pal = [[150, 60, 40], [130, 50, 36], [168, 74, 48]];
-  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-    const row = y >> 2, bx = (x + (row & 1) * 4) % 8, i = y * 16 + x;
-    let c;
-    if (y % 4 === 3 || bx === 7) c = [70, 64, 60];
-    else {
-      c = pal[(((x + (row & 1) * 4) >> 3) + row * 3) * 37 % 3].slice();
-      if (y % 4 === 0) { c[0] += 30; c[1] += 20; c[2] += 15; }
-    }
-    brick.r[i] = c[0]; brick.g[i] = c[1]; brick.b[i] = c[2];
+function makeTex(fn) {
+  const t = { r: new Uint8Array(1024), g: new Uint8Array(1024), b: new Uint8Array(1024) };
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    const c = fn(x, y), i = y * 32 + x;
+    t.r[i] = c[0]; t.g[i] = c[1]; t.b[i] = c[2];
   }
-})();
+  return t;
+}
+function brickPx(x, y) {
+  x &= 15; y &= 15;
+  const row = y >> 2, bx = (x + (row & 1) * 4) % 8;
+  if (y % 4 === 3 || bx === 7) return [70, 64, 60];
+  const c = [[150, 60, 40], [130, 50, 36], [168, 74, 48]][(((x + (row & 1) * 4) >> 3) + row * 3) * 37 % 3].slice();
+  if (y % 4 === 0) { c[0] += 30; c[1] += 20; c[2] += 15; }
+  return c;
+}
+const CHALK = [
+  "..........................",
+  "WWWWWWWWWWWWWWWWWWWW......",
+  "W...................WWWWWW",
+  "W.......WWWWWW...........W",
+  "WWWWWWWWW....W.W..WWWWWWWW",
+  ".............W.W..W.......",
+  ".............WWW..W.......",
+  "..................W.......",
+  "..................WWW.....",
+];
+const TEX_BRICK = makeTex(brickPx);
+const TEX_CHALK = makeTex((x, y) => {
+  const c = brickPx(x, y).map(v => v * 0.8 | 0);
+  const ax = x - 3, ay = y - 11;
+  if (ay >= 0 && ay < CHALK.length && ax >= 0 && ax < CHALK[0].length && CHALK[ay][ax] === "W") return [230, 226, 210];
+  return c;
+});
+const TEX_DOOR = makeTex((x, y) => {
+  if (y === 7 || y === 8 || y === 23 || y === 24) return (x % 6 === 2) ? [190, 190, 170] : [70, 70, 78]; // iron bands + rivets
+  if (x % 8 === 0) return [40, 24, 14];                                                           // plank gaps
+  const shade = [[120, 76, 40], [104, 64, 34], [132, 86, 46], [112, 70, 38]][(x >> 3) & 3];
+  return (y * 7 + (x >> 3) * 13) % 11 === 0 ? shade.map(v => v - 20) : shade;                     // wood grain
+});
+const TEXTURES = [null, TEX_BRICK, TEX_DOOR, TEX_CHALK];
 
 const sprites = [];
 function loadSprites() {
@@ -489,21 +660,25 @@ function fillRect(x, y, w, h, c) {
   for (let yy = y0; yy < y1; yy++) px.fill(c, yy * W + x0, yy * W + x1);
 }
 
-const GUN = [
-  "......KK......",
-  ".....KGGK.....",
-  ".....KGGK.....",
-  "....KGLGGK....",
-  "....KGLGGK....",
-  "....KGLGGK....",
-  "....KGDDGK....",
-  "...SKGGGGKS...",
-  "..SSKKKKKKSS..",
-  ".SSSSSSSSSSSS.",
-  ".SSSHSSSSHSSS.",
-  "SSSSSSSSSSSSSS",
-];
-const GUN_COL = { K: rgb(12, 12, 12), G: rgb(115, 115, 128), L: rgb(180, 180, 190), D: rgb(64, 64, 72), S: rgb(217, 153, 115), H: rgb(166, 107, 77) };
+// First-person gun pixel art. K outline, G metal, L shine, D dark, W wood, S skin, H knuckles, R red, N green glow
+const GUN_ART = {
+  pistol: ["......KK......", ".....KGGK.....", ".....KGGK.....", "....KGLGGK....", "....KGLGGK....", "....KGLGGK....",
+           "....KGDDGK....", "...SKGGGGKS...", "..SSKKKKKKSS..", ".SSSSSSSSSSSS.", ".SSSHSSSSHSSS.", "SSSSSSSSSSSSSS"],
+  rifle:  ["......KK......", "......KG......", "......KG......", ".....KGGK.....", ".....KWWK.....", "....KWWWWK....",
+           "....KWLWWK....", "....KWWWWK....", "...SKWDDWKS...", "..SSKKKKKKSS..", ".SSSHSSSSHSSS.", "SSSSSSSSSSSSSS"],
+  shotgun:["....KKKKKK....", "....KGKKGK....", "....KGKKGK....", "....KGKKGK....", "....KWWWWK....", "...KWWLWWWK...",
+           "...KWWLWWWK...", "...KWWWWWWK...", "..SKWWWWWWKS..", ".SSKKKKKKKKSS.", ".SSSHSSSSHSSS.", "SSSSSSSSSSSSSS"],
+  pump:   [".....KKK......", ".....KGK......", ".....KGK......", "....KKGKK.....", "....KWWWK.....", "....KWWWK.....",
+           "....KKGKK.....", "....KGLGGK....", "...SKGGGGKS...", "..SSKKKKKKSS..", ".SSSHSSSSHSSS.", "SSSSSSSSSSSSSS"],
+  smg:    ["......KK......", ".....KGGK.....", ".....KGGK.....", "....KGLGGK....", "....KDDDDK....", "....KGLGGK....",
+           "KKKKKGGGGK....", "KDDDKGGGGKS...", "KDDDKKKKKKSS..", "KDDDSSSSSSSSS.", ".SSSHSSSSHSSS.", "SSSSSSSSSSSSSS"],
+  stg:    ["......KK......", ".....KGGK.....", ".....KWWK.....", "....KWLWWK....", "....KDDDDK....", "....KGLGGK....",
+           "...KKGGGGK....", "...KDKGGGGKS..", "...KDKKKKKKSS.", "...KDSSSSSSSS.", ".SSSHSSSSHSSS.", "SSSSSSSSSSSSSS"],
+  ray:    ["......RR......", ".....RNNR.....", "....RNRRNR....", "....KGGGGK....", "...KRRRRRRK...", "...KGLGGGGK...",
+           "...KRRRRRRK...", "....KGGGGK....", "...SKGGGGKS...", "..SSKKKKKKSS..", ".SSSHSSSSHSSS.", "SSSSSSSSSSSSSS"],
+};
+const GUN_COL = { K: rgb(12, 12, 12), G: rgb(115, 115, 128), L: rgb(180, 180, 190), D: rgb(64, 64, 72), W: rgb(122, 74, 38),
+  S: rgb(217, 153, 115), H: rgb(166, 107, 77), R: rgb(200, 40, 30), N: rgb(120, 255, 120) };
 
 function render() {
   const p = G.p;
@@ -516,17 +691,18 @@ function render() {
   for (let x = 0; x < W; x++) {
     const cam = 2 * (x + 0.5) / W - 1;
     const rdx = dX + rX * PLANE * cam, rdy = dY + rY * PLANE * cam;
-    let dist = Math.max(raycast(p.x, p.y, rdx, rdy), 0.5); // already perpendicular: no fisheye
+    const dist = Math.max(raycast(p.x, p.y, rdx, rdy), 0.5); // already perpendicular: no fisheye
     zbuf[x] = dist;
+    const tex = TEXTURES[tile[rayCell]] || TEX_BRICK;
     let u = rayU;
     if ((raySide === 0 && rdx < 0) || (raySide === 1 && rdy > 0)) u = 1 - u;
-    const tx = Math.floor(u * 32) & 15;
+    const tx = Math.min(31, Math.floor(u * 32));
     const lineH = PROJ * S / dist, top = HOR - lineH / 2;
     const y0 = Math.max(0, Math.ceil(top)), y1 = Math.min(VH, Math.ceil(top + lineH));
-    const f = band(clamp(1 - dist / (S * 14), 0.2, 1)) * (raySide ? 0.7 : 1);
+    const f = band(clamp(1 - dist / (S * 14), 0.15, 1)) * (raySide ? 0.7 : 1);
     for (let y = y0; y < y1; y++) {
-      const ty = Math.floor((y - top) / lineH * 32) & 15, i = ty * 16 + tx;
-      px[y * W + x] = rgb(brick.r[i] * f | 0, brick.g[i] * f | 0, brick.b[i] * f | 0);
+      const ty = Math.min(31, Math.floor((y - top) / lineH * 32)), i = ty * 32 + tx;
+      px[y * W + x] = rgb(tex.r[i] * f | 0, tex.g[i] * f | 0, tex.b[i] * f | 0);
     }
   }
 
@@ -541,7 +717,7 @@ function render() {
     const bottom = HOR + PROJ * (S / 2) / depth, top = bottom - size, left = sx - size / 2;
     const x0 = Math.max(0, Math.floor(left)), x1 = Math.min(W, Math.ceil(left + size));
     const y0 = Math.max(0, Math.ceil(top)), y1 = Math.min(VH, Math.ceil(bottom));
-    const f = band(clamp(1 - depth / (S * 14), 0.25, 1));
+    const f = band(clamp(1 - depth / (S * 14), 0.2, 1));
     for (let x = x0; x < x1; x++) {
       if (depth >= zbuf[x]) continue;
       const tx = clamp(Math.floor((x - left) / size * spr.w), 0, spr.w - 1);
@@ -556,38 +732,40 @@ function render() {
     }
   }
 
-  // Pistol
-  const ps = 3, recoil = G.flash > 0 ? 5 : 0;
-  const dip = G.reload > 0 ? 24 * Math.sin(Math.PI * G.reload / RELOAD) : 0;
-  const gx = W / 2 - 7 * ps, gy = Math.round(VH - GUN.length * ps + recoil + dip);
+  // Gun in hand
+  const art = GUN_ART[weapon().art], wp = weapon();
+  const ps = 3, recoil = G.flash > 0 ? (wp.pellets ? 9 : 5) : 0;
+  const dip = G.reload > 0 ? 26 * Math.sin(Math.PI * G.reload / wp.reload) : G.swap > 0 ? 40 * G.swap / 0.35 : 0;
+  const gx = W / 2 - 7 * ps, gy = Math.round(VH - art.length * ps + recoil + dip);
   if (G.flash > 0) {
-    fillRect(W / 2 - 7, gy - 12, 14, 8, rgb(255, 220, 60));
-    fillRect(W / 2 - 3, gy - 18, 6, 18, rgb(255, 220, 60));
-    fillRect(W / 2 - 3, gy - 11, 6, 6, rgb(255, 255, 210));
+    const fc = wp.splash ? rgb(120, 255, 120) : rgb(255, 220, 60), core = wp.splash ? rgb(230, 255, 230) : rgb(255, 255, 210);
+    const big = wp.pellets ? 4 : 0;
+    fillRect(W / 2 - 7 - big, gy - 12 - big, 14 + big * 2, 8 + big, fc);
+    fillRect(W / 2 - 3, gy - 18 - big, 6, 18 + big, fc);
+    fillRect(W / 2 - 3, gy - 11, 6, 6, core);
   }
-  for (let r = 0; r < GUN.length; r++) for (let c = 0; c < 14; c++) {
-    const col = GUN_COL[GUN[r][c]];
+  for (let r = 0; r < art.length; r++) for (let c = 0; c < 14; c++) {
+    const col = GUN_COL[art[r][c]];
     if (col && gy + r * ps < VH) fillRect(gx + c * ps, gy + r * ps, ps, Math.min(ps, VH - (gy + r * ps)), col);
   }
 
-  // Crosshair + hit marker
-  const cx = W / 2, cy = HOR, white = rgb(255, 255, 255);
-  fillRect(cx, cy - 5, 1, 3, white); fillRect(cx, cy + 3, 1, 3, white);
-  fillRect(cx - 5, cy, 3, 1, white); fillRect(cx + 3, cy, 3, 1, white);
+  // Crosshair (wider for shotguns) + hit marker
+  const cx = W / 2, cy = HOR, white = rgb(255, 255, 255), gap = wp.pellets ? 6 : 3;
+  fillRect(cx, cy - gap - 3, 1, 3, white); fillRect(cx, cy + gap, 1, 3, white);
+  fillRect(cx - gap - 3, cy, 3, 1, white); fillRect(cx + gap, cy, 3, 1, white);
   if (G.hit > 0) for (let k = 3; k < 6; k++) {
     fillRect(cx - k, cy - k, 1, 1, white); fillRect(cx + k, cy - k, 1, 1, white);
     fillRect(cx - k, cy + k, 1, 1, white); fillRect(cx + k, cy + k, 1, 1, white);
   }
 
-  // Minimap
+  // Minimap: 2 px per cell
   if (showMap) {
-    const m = 3, ox = 4, oy = 4;
-    fillRect(ox - 1, oy - 1, MX * m + 2, MY * m + 2, rgb(0, 0, 0));
-    for (let y = 0; y < MY; y++) for (let x = 0; x < MX; x++)
-      fillRect(ox + x * m, oy + y * m, m, m, MAP[y][x] ? rgb(120, 52, 38) : rgb(22, 19, 28));
-    for (const z of G.zombies) fillRect(ox + z.x / S * m - 1, oy + z.y / S * m - 1, 2, 2, rgb(235, 40, 30));
-    fillRect(ox + p.x / S * m - 1, oy + p.y / S * m - 1, 2, 2, rgb(255, 230, 60));
-    fillRect(ox + (p.x + dX * 14) / S * m, oy + (p.y + dY * 14) / S * m, 1, 1, rgb(255, 230, 60));
+    const m = 2, ox = 4, oy = 4;
+    fillRect(ox - 1, oy - 1, MW * m + 2, MH * m + 2, rgb(0, 0, 0));
+    const cols = [rgb(22, 19, 28), rgb(120, 52, 38), rgb(200, 140, 40), rgb(235, 230, 210)];
+    for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) fillRect(ox + x * m, oy + y * m, m, m, cols[tile[y * MW + x]]);
+    for (const z of G.zombies) fillRect(ox + Math.floor(z.x / S * m), oy + Math.floor(z.y / S * m), 1, 1, rgb(255, 40, 30));
+    fillRect(ox + Math.floor(p.x / S * m) - 1, oy + Math.floor(p.y / S * m) - 1, 2, 2, rgb(255, 230, 60));
   }
 
   // HUD strip
@@ -608,14 +786,14 @@ function render() {
   ctx.textBaseline = "top";
   text(`RND ${G.round}`, 6, VH + 6, "#e0352c");
   text(`${p.points}`, 92, VH + 6, "#f2c14e");
-  text(`KILLS ${p.kills}`, 92, VH + 18, "#8d8496");
-  let ammo = `${G.mag}/${G.reserve}`, ac2 = "#e9e2d4";
-  if (G.reload > 0) { ammo = "RELOAD"; ac2 = "#8d8496"; }
-  else if (G.mag === 0 && G.reserve === 0) { ammo = "NO AMMO"; ac2 = "#e0352c"; }
-  else if (G.mag === 0) { ammo = "PRESS R"; ac2 = "#e0352c"; }
-  text(ammo, W - 6 - ammo.length * 8, VH + 6, ac2);
-  const left = `LEFT ${remaining()}`;
-  text(left, W - 6 - left.length * 8, VH + 18, "#8d8496");
+  text(`LEFT ${remaining()}`, 92, VH + 18, "#8d8496");
+  const g = gun();
+  let ammo = `${g.mag}/${g.res}`, acol = "#e9e2d4";
+  if (G.reload > 0) { ammo = "RELOAD"; acol = "#8d8496"; }
+  else if (g.mag === 0 && g.res === 0) { ammo = "NO AMMO"; acol = "#e0352c"; }
+  else if (g.mag === 0) { ammo = "PRESS R"; acol = "#e0352c"; }
+  rtext(ammo, VH + 6, acol);
+  rtext(wp.name + (G.guns.length > 1 ? ` ${G.cur + 1}/2` : ""), VH + 18, "#8d8496");
 
   if (G.state === "over") {
     ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0, 0, W, VH);
@@ -623,14 +801,24 @@ function render() {
     centered(`YOU MADE IT TO ROUND ${G.round}`, 76, "#e9e2d4");
     centered(`BEST: ROUND ${best}`, 92, "#f2c14e");
     centered(touch ? "TAP FIRE TO RETRY" : "PRESS ENTER TO RETRY", 120, "#e9e2d4");
-  } else if (G.roundBreak > 0) {
-    centered(G.round === 0 ? "GET READY..." : `ROUND ${G.round} SURVIVED`, 30, "#e0352c");
+    return;
   }
+  if (G.roundBreak > 0) centered(G.round === 0 ? "GET READY..." : `ROUND ${G.round} SURVIVED`, 30, "#e0352c");
+  if (target) {
+    const btn = touch ? "BUY" : "F";
+    let s;
+    if (target.kind === "door") s = `${btn}: OPEN DOOR [${target.cost}]`;
+    else if (target.owned >= 0) s = `${btn}: ${WEAPONS[target.id].name} AMMO [${target.cost}]`;
+    else s = `${btn}: BUY ${WEAPONS[target.id].name} [${target.cost}]`;
+    centered(s, HOR + 22, p.points >= target.cost ? "#e9e2d4" : "#8d8496");
+  }
+  if (G.msgT > 0) centered(G.msg, HOR + 36, "#f2c14e");
 }
 function text(s, x, y, color) {
   ctx.fillStyle = "#000"; ctx.fillText(s, x + 1, y + 1);
   ctx.fillStyle = color; ctx.fillText(s, x, y);
 }
+function rtext(s, y, color) { text(s, W - 6 - s.length * 8, y, color); }
 function centered(s, y, color) { text(s, Math.round(W / 2 - s.length * 4), y, color); }
 
 // ---------------------------------------------------------------- input
@@ -639,30 +827,40 @@ const touch = matchMedia("(hover: none), (pointer: coarse)").matches;
 const KEYMAP = { KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d", KeyQ: "q", KeyE: "e",
   ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", ShiftLeft: "shift", ShiftRight: "shift" };
 
-function restart() { G = newGame(); }
+function restart() { G = newGame(); rebuildTiles(); }
+function pressFire() { fireHeld = true; tryFire(); }
 
 addEventListener("keydown", e => {
   if (!started) return;
   ensureAudio();
   const k = KEYMAP[e.code];
   if (k) keys[k] = true;
-  if (e.code === "Space") { if (!e.repeat) fire(); }
+  if (e.code === "Space") { if (!e.repeat) pressFire(); }
   else if (e.code === "KeyR") startReload();
+  else if (e.code === "KeyF") { if (!e.repeat) interact(); }
+  else if (e.code === "Digit1") switchGun(0);
+  else if (e.code === "Digit2") switchGun(1);
   else if (e.code === "KeyM") showMap = !showMap;
   else if (e.code === "Enter" && G.state === "over") restart();
   else if (!k) return;
   e.preventDefault();
 });
-addEventListener("keyup", e => { const k = KEYMAP[e.code]; if (k) keys[k] = false; });
-addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+addEventListener("keyup", e => {
+  const k = KEYMAP[e.code];
+  if (k) keys[k] = false;
+  if (e.code === "Space") fireHeld = false;
+});
+addEventListener("blur", () => { for (const k in keys) keys[k] = false; fireHeld = false; });
 
 canvas.addEventListener("mousedown", e => {
   if (!started || e.button !== 0) return;
   ensureAudio();
   if (G.state === "over") { restart(); return; }
   if (!touch && document.pointerLockElement !== canvas) lockMouse();
-  else fire();
+  else pressFire();
 });
+addEventListener("mouseup", e => { if (e.button === 0) fireHeld = false; });
+canvas.addEventListener("wheel", e => { if (started) { e.preventDefault(); switchGun(); } }, { passive: false });
 addEventListener("mousemove", e => {
   if (document.pointerLockElement === canvas && G.state === "play" && G.p.alive)
     G.p.a = ((G.p.a - e.movementX * 0.15) % 360 + 360) % 360;
@@ -676,11 +874,17 @@ for (const b of document.querySelectorAll(".pad button")) {
   const down = e => {
     e.preventDefault(); ensureAudio(); b.classList.add("on");
     if (!started) begin();
-    if (k === "fire") { if (G.state === "over") restart(); else fire(); }
+    if (k === "fire") { if (G.state === "over") restart(); else pressFire(); }
     else if (k === "reload") startReload();
+    else if (k === "buy") interact();
+    else if (k === "swap") switchGun();
     else keys[k] = true;
   };
-  const up = () => { b.classList.remove("on"); if (k !== "fire" && k !== "reload") keys[k] = false; };
+  const up = () => {
+    b.classList.remove("on");
+    if (k === "fire") fireHeld = false;
+    else if (!["reload", "buy", "swap"].includes(k)) keys[k] = false;
+  };
   b.addEventListener("pointerdown", down);
   b.addEventListener("pointerup", up);
   b.addEventListener("pointercancel", up);
@@ -708,7 +912,8 @@ function loop(now) {
 }
 
 function boot(data) {
-  if (data && data.G) { G = data.G; started = !!data.started; showMap = data.showMap !== false; startBtn.hidden = started; }
+  if (data && data.G && data.G.guns) { G = data.G; started = !!data.started; showMap = data.showMap !== false; startBtn.hidden = started; }
+  rebuildTiles();
   loadSprites().then(() => requestAnimationFrame(loop));
 }
 const hot = window.claude && window.claude.hot;
