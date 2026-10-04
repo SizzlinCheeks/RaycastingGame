@@ -1,0 +1,3 @@
+*.o
+zombies
+.DS_Store
